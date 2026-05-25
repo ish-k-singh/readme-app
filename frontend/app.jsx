@@ -68,7 +68,8 @@ function App() {
 
   // Init Clerk
   React.useEffect(() => {
-    const clerk = new window.Clerk(window.CLERK_PUBLISHABLE_KEY);
+    const clerk = window.Clerk;
+    if (!clerk) { setAuthState('signed-out'); return; }
     window.__clerk = clerk;
     clerk.load().then(() => {
       setClerkUser(clerk.user || null);
@@ -77,7 +78,7 @@ function App() {
         setClerkUser(user || null);
         setAuthState(user ? 'signed-in' : 'signed-out');
       });
-    });
+    }).catch(() => setAuthState('signed-out'));
   }, []);
 
   // Sync Clerk user to backend + populate profile name
