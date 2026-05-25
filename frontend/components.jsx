@@ -144,13 +144,19 @@ function Sidebar({ route, setRoute, readlists, readCount, profile }) {
         ))}
       </nav>
 
-      <div className="sidebar-foot" onClick={() => setRoute({ name: 'profile' })}>
-        <div className="row gap-3">
-          <div className="avatar">{initials}</div>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 14 }}>{displayName.length > 14 ? displayName.split(' ')[0] : displayName}</div>
+      <div className="sidebar-foot">
+        <div className="row gap-3" style={{ alignItems: 'center' }}>
+          <div className="avatar" style={{ cursor: 'pointer' }} onClick={() => setRoute({ name: 'profile' })}>{initials}</div>
+          <div style={{ flex: 1, minWidth: 0, cursor: 'pointer' }} onClick={() => setRoute({ name: 'profile' })}>
+            <div style={{ fontWeight: 700, fontSize: 13 }}>{displayName.length > 14 ? displayName.split(' ')[0] : displayName}</div>
             <div className="label" style={{ color: 'rgba(26,26,26,0.55)' }}>{readCount} books read</div>
           </div>
+          <button title="Sign out" onClick={() => window.__clerk?.signOut()}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', opacity: 0.45, padding: 4, lineHeight: 1 }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="square">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+            </svg>
+          </button>
         </div>
       </div>
     </aside>

@@ -83,6 +83,17 @@ CREATE TABLE IF NOT EXISTS user_reviews (
   PRIMARY KEY (user_id, book_id)
 );
 
+-- ── Clerk users ───────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS clerk_users (
+  id            TEXT PRIMARY KEY,          -- Clerk user ID (user_2abc...)
+  email         TEXT,
+  name          TEXT,
+  avatar_url    TEXT,
+  bio           TEXT          DEFAULT '',
+  tag_interests TEXT[]        DEFAULT '{}',
+  created_at    TIMESTAMPTZ   DEFAULT NOW()
+);
+
 -- ── Indexes ────────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS idx_books_tags         ON books USING GIN (tags);
 CREATE INDEX IF NOT EXISTS idx_readlist_books_pos ON readlist_books (readlist_id, position);

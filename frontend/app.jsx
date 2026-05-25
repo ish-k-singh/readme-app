@@ -27,7 +27,31 @@ const FONT_OPTIONS = [
 // API base — switch to backend URL when wired up
 const API = window.README_API_BASE || '';
 
+function SignInScreen() {
+  return (
+    <div style={{ display: 'grid', placeItems: 'center', minHeight: '100vh', background: 'var(--paper)' }}>
+      <div style={{ textAlign: 'center', maxWidth: 440, padding: 40 }}>
+        <div style={{ fontFamily: 'var(--f-display)', fontSize: 52, lineHeight: 1, marginBottom: 8 }}>ReadMe</div>
+        <div style={{ fontFamily: 'var(--f-serif)', fontStyle: 'italic', fontSize: 20, marginBottom: 40, color: 'rgba(26,26,26,0.6)' }}>
+          Your books. Your taste.
+        </div>
+        <button className="btn primary lg" style={{ width: '100%', justifyContent: 'center' }}
+          onClick={() => window.__clerk?.openSignIn()}>
+          Sign in with Google
+        </button>
+      </div>
+    </div>
+  );
+}
+
+async function getToken() {
+  if (!window.__clerk?.session) return null;
+  return window.__clerk.session.getToken();
+}
+
 function App() {
+  const [authState, setAuthState] = React.useState('loading');
+  const [clerkUser, setClerkUser] = React.useState(null);
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [route, setRoute] = React.useState({ name: 'home' });
   const [books, setBooks] = React.useState(BOOKS);
@@ -41,6 +65,40 @@ function App() {
   const [reviewingId, setReviewingId] = React.useState(null);
   const [query, setQuery] = React.useState('');
   const [detailId, setDetailId] = React.useState(null);
+
+  // Init Clerk
+  React.useEffect(() => {
+    const clerk = new window.Clerk(window.CLERK_PUBLISHABLE_KEY);
+    window.__clerk = clerk;
+    clerk.load().then(() => {
+      setClerkUser(clerk.user || null);
+      setAuthState(clerk.user ? 'signed-in' : 'signed-out');
+      clerk.addListener(({ user }) => {
+        setClerkUser(user || null);
+        setAuthState(user ? 'signed-in' : 'signed-out');
+      });
+    });
+  }, []);
+
+  // Sync Clerk user to backend + populate profile name
+  React.useEffect(() => {
+    if (!clerkUser || !API) return;
+    const name = [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(' ') || clerkUser.username || 'Reader';
+    setProfile(p => ({ ...p, name }));
+    getToken().then(token => {
+      if (!token) return;
+      // Upsert user in DB
+      fetch(`${API}/api/users/me`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ name, email: clerkUser.primaryEmailAddress?.emailAddress || '', avatar_url: clerkUser.imageUrl || '' }),
+      });
+      // Load saved profile (bio, tagInterests)
+      fetch(`${API}/api/users/me`, { headers: { 'Authorization': `Bearer ${token}` } })
+        .then(r => r.ok ? r.json() : null)
+        .then(u => { if (u) setProfile(p => ({ ...p, bio: u.bio || '', tagInterests: u.tag_interests || [] })); });
+    });
+  }, [clerkUser?.id]);
 
   // Load books and readlists from backend on mount
   React.useEffect(() => {
@@ -136,7 +194,17 @@ function App() {
     deleteReview: (id) => setReviews(r => { const c = { ...r }; delete c[id]; return c; }),
     openReview: (id) => setReviewingId(id),
     profile,
-    updateProfile: (updates) => setProfile(p => ({ ...p, ...updates })),
+    updateProfile: async (updates) => {
+      setProfile(p => ({ ...p, ...updates }));
+      if (API) {
+        const token = await getToken();
+        if (token) fetch(`${API}/api/users/me`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ bio: updates.bio, tag_interests: updates.tagInterests }),
+        }).catch(() => {});
+      }
+    },
     savedListIds,
     toggleSaveList: (id) => setSavedListIds(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]),
     deleteReadlist: (id) => setReadlists(r => r.filter(rl => rl.id !== id)),
@@ -170,6 +238,14 @@ function App() {
 
   const detailBook = detailId ? books.find(b => b.id === detailId) : null;
   const reviewingBook = reviewingId ? books.find(b => b.id === reviewingId) : null;
+
+  if (authState === 'loading') return (
+    <div style={{ display: 'grid', placeItems: 'center', minHeight: '100vh', background: 'var(--paper)', fontFamily: 'var(--f-display)', fontSize: 32 }}>
+      ReadMe
+    </div>
+  );
+
+  if (authState === 'signed-out') return <SignInScreen />;
 
   return (
     <div className="app" data-screen-label="00 ReadMe App">
