@@ -176,8 +176,6 @@ function TopBar({ query, setQuery, setRoute }) {
         />
         <span className="label" style={{ color: 'rgba(10,10,10,0.5)' }}>⌘K</span>
       </div>
-      <button className="icon-btn" title="Notifications"><Icon name="bell" /></button>
-      <button className="icon-btn" title="New readlist"><Icon name="plus" /></button>
     </div>
   );
 }
