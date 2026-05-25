@@ -11,10 +11,14 @@ import { errorHandler } from './middleware/error.js';
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+const ALLOWED_ORIGINS = new Set([
+  'https://readme-books.vercel.app',
+  ...(process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()) : []),
+]);
+
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow any localhost/127.0.0.1 port in dev, or the configured production origin
-    if (!origin || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) || origin === process.env.CORS_ORIGIN) {
+    if (!origin || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) || ALLOWED_ORIGINS.has(origin)) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
