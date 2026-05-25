@@ -6,6 +6,7 @@ import { reviewsRouter } from './routes/reviews.js';
 import { generateRouter } from './routes/generate.js';
 import { adminRouter } from './routes/admin.js';
 import { usersRouter } from './routes/users.js';
+import { shelfRouter } from './routes/shelf.js';
 import { errorHandler } from './middleware/error.js';
 
 const app = express();
@@ -35,6 +36,7 @@ app.use('/api/reviews', reviewsRouter);
 app.use('/api/generate', generateRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/users', usersRouter);
+app.use('/api/me', shelfRouter);
 
 app.use(errorHandler);
 

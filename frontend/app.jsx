@@ -24,7 +24,6 @@ const FONT_OPTIONS = [
   { id: 'serif-all', label: 'All Editorial',     display: '"DM Serif Display"', serif: '"DM Serif Display"' },
 ];
 
-// API base — switch to backend URL when wired up
 const API = window.README_API_BASE || '';
 
 function SignInScreen() {
@@ -66,6 +65,37 @@ function App() {
   const [query, setQuery] = React.useState('');
   const [detailId, setDetailId] = React.useState(null);
 
+  // Refs so debounced/async callbacks can read latest state
+  const readingRef = React.useRef(reading);
+  React.useEffect(() => { readingRef.current = reading; }, [reading]);
+  const pageTimer = React.useRef(null);
+
+  // Build the payload for one book using current state + explicit overrides
+  const snap = (id, overrides = {}) => {
+    const prog = reading[id];
+    const rev = reviews[id];
+    return {
+      is_read: readIds.includes(id),
+      is_saved: savedIds.includes(id),
+      reading_page: prog?.page ?? null,
+      reading_started: prog?.started ?? null,
+      review_rating: rev?.rating ?? null,
+      review_text: rev?.text ?? null,
+      ...overrides,
+    };
+  };
+
+  const persist = async (id, data) => {
+    if (!API) return;
+    const token = await getToken();
+    if (!token) return;
+    fetch(`${API}/api/me/shelf/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify(data),
+    }).catch(() => {});
+  };
+
   // Init Clerk
   React.useEffect(() => {
     const clerk = window.Clerk;
@@ -88,16 +118,37 @@ function App() {
     setProfile(p => ({ ...p, name }));
     getToken().then(token => {
       if (!token) return;
-      // Upsert user in DB
       fetch(`${API}/api/users/me`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ name, email: clerkUser.primaryEmailAddress?.emailAddress || '', avatar_url: clerkUser.imageUrl || '' }),
       });
-      // Load saved profile (bio, tagInterests)
       fetch(`${API}/api/users/me`, { headers: { 'Authorization': `Bearer ${token}` } })
         .then(r => r.ok ? r.json() : null)
         .then(u => { if (u) setProfile(p => ({ ...p, bio: u.bio || '', tagInterests: u.tag_interests || [] })); });
+    });
+  }, [clerkUser?.id]);
+
+  // Load shelf (read/saved/reading/reviews) from backend on sign-in
+  React.useEffect(() => {
+    if (!clerkUser || !API) return;
+    getToken().then(token => {
+      if (!token) return;
+      fetch(`${API}/api/me/shelf`, { headers: { 'Authorization': `Bearer ${token}` } })
+        .then(r => r.ok ? r.json() : [])
+        .then(rows => {
+          if (!rows.length) return;
+          setReadIds(rows.filter(r => r.is_read).map(r => r.book_id));
+          setSavedIds(rows.filter(r => r.is_saved).map(r => r.book_id));
+          setReading(Object.fromEntries(
+            rows.filter(r => r.reading_page != null)
+                .map(r => [r.book_id, { page: r.reading_page, started: r.reading_started }])
+          ));
+          setReviews(Object.fromEntries(
+            rows.filter(r => r.review_rating != null)
+                .map(r => [r.book_id, { rating: r.review_rating, text: r.review_text || '' }])
+          ));
+        });
     });
   }, [clerkUser?.id]);
 
@@ -163,36 +214,64 @@ function App() {
     openBook: (id) => setDetailId(id),
     openReadlist: (id) => setRoute({ name: 'readlist', id }),
     setRoute,
-    toggleSave: (id) => setSavedIds(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]),
+    toggleSave: (id) => {
+      const nowSaved = !savedIds.includes(id);
+      setSavedIds(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+      persist(id, snap(id, { is_saved: nowSaved }));
+    },
     toggleRead: (id) => {
       if (readIds.includes(id)) {
         setReadIds(s => s.filter(x => x !== id));
         setReviews(r => { const c = { ...r }; delete c[id]; return c; });
+        persist(id, snap(id, { is_read: false, review_rating: null, review_text: null }));
       } else {
         setReadIds(s => [...s, id]);
         setReading(r => { const c = { ...r }; delete c[id]; return c; });
         setReviewingId(id);
+        persist(id, snap(id, { is_read: true, reading_page: null, reading_started: null }));
       }
     },
     startReading: (id, page = 0) => {
-      setReading(r => ({ ...r, [id]: { page, started: new Date().toISOString().slice(0, 10) } }));
+      const started = new Date().toISOString().slice(0, 10);
+      setReading(r => ({ ...r, [id]: { page, started } }));
       setReadIds(s => s.filter(x => x !== id));
+      persist(id, snap(id, { is_read: false, reading_page: page, reading_started: started }));
     },
     updatePage: (id, page) => {
       const book = books.find(b => b.id === id);
       const clamped = Math.max(0, Math.min(book.pages, Math.round(page)));
       setReading(r => r[id] ? ({ ...r, [id]: { ...r[id], page: clamped } }) : r);
+      clearTimeout(pageTimer.current);
+      pageTimer.current = setTimeout(async () => {
+        const prog = readingRef.current[id];
+        if (!prog || !API) return;
+        const token = await getToken();
+        if (!token) return;
+        fetch(`${API}/api/me/shelf/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify(snap(id, { reading_page: clamped, reading_started: prog.started })),
+        }).catch(() => {});
+      }, 1500);
     },
     stopReading: (id) => {
       setReading(r => { const c = { ...r }; delete c[id]; return c; });
+      persist(id, snap(id, { reading_page: null, reading_started: null }));
     },
     finishReading: (id) => {
       setReading(r => { const c = { ...r }; delete c[id]; return c; });
       setReadIds(s => s.includes(id) ? s : [...s, id]);
       setReviewingId(id);
+      persist(id, snap(id, { is_read: true, reading_page: null, reading_started: null }));
     },
-    saveReview: (id, review) => setReviews(r => ({ ...r, [id]: review })),
-    deleteReview: (id) => setReviews(r => { const c = { ...r }; delete c[id]; return c; }),
+    saveReview: (id, review) => {
+      setReviews(r => ({ ...r, [id]: review }));
+      persist(id, snap(id, { review_rating: review.rating, review_text: review.text || null }));
+    },
+    deleteReview: (id) => {
+      setReviews(r => { const c = { ...r }; delete c[id]; return c; });
+      persist(id, snap(id, { review_rating: null, review_text: null }));
+    },
     openReview: (id) => setReviewingId(id),
     profile,
     updateProfile: async (updates) => {
@@ -225,7 +304,6 @@ function App() {
     addReadlist: (list) => setReadlists(r => [list, ...r]),
     addToReadlist: (rid, bid) => setReadlists(r => r.map(rl => rl.id === rid && !rl.bookIds.includes(bid) ? { ...rl, bookIds: [...rl.bookIds, bid] } : rl)),
     generateFromTaste: () => {},
-    // Called by GeneratorScreen to hit the real backend
     generateReadlist: async (params) => {
       if (!API) return null;
       const res = await fetch(`${API}/api/generate`, {
