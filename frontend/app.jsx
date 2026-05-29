@@ -301,7 +301,16 @@ function App() {
       setBooks(prev => prev.find(b => b.id === book.id) ? prev : [...prev, book]);
       return book;
     },
-    addReadlist: (list) => setReadlists(r => [list, ...r]),
+    addReadlist: async (list) => {
+      setReadlists(r => [list, ...r]);
+      if (API) {
+        fetch(`${API}/api/readlists`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(list),
+        }).catch(() => {});
+      }
+    },
     addToReadlist: (rid, bid) => setReadlists(r => r.map(rl => rl.id === rid && !rl.bookIds.includes(bid) ? { ...rl, bookIds: [...rl.bookIds, bid] } : rl)),
     generateFromTaste: () => {},
     generateReadlist: async (params) => {
