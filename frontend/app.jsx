@@ -287,7 +287,10 @@ function App() {
     },
     savedListIds,
     toggleSaveList: (id) => setSavedListIds(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]),
-    deleteReadlist: (id) => setReadlists(r => r.filter(rl => rl.id !== id)),
+    deleteReadlist: (id) => {
+      setReadlists(r => r.filter(rl => rl.id !== id));
+      if (API) fetch(`${API}/api/readlists/${id}`, { method: 'DELETE' }).catch(() => {});
+    },
     updateBook: (id, updates) => setBooks(prev => prev.map(b => b.id === id ? { ...b, ...updates } : b)),
     importBook: async (olBook) => {
       if (!API) return null;

@@ -62,6 +62,15 @@ readlistsRouter.post('/', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// DELETE /api/readlists/:id
+readlistsRouter.delete('/:id', async (req, res, next) => {
+  try {
+    await query('DELETE FROM readlist_books WHERE readlist_id = $1', [req.params.id]);
+    await query('DELETE FROM readlists WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
 // PATCH /api/readlists/:id/save — increment saves count
 readlistsRouter.patch('/:id/save', async (req, res, next) => {
   try {

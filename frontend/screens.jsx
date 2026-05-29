@@ -5,18 +5,64 @@ const { BOOKS, READLISTS, SEED_READ, MOODS, GENRES, LENGTHS } = window.READ_DATA
 /* ──────────────────── HOME / FOR YOU ──────────────────── */
 
 function HomeScreen({ ctx }) {
-  const { books, readlists, savedIds, readIds, reading, openBook, openReadlist, setRoute, updatePage, profile } = ctx;
+  const { books, readlists, readIds, reading, openBook, openReadlist, setRoute, updatePage, profile, generateReadlist, addReadlist, updateBook, deleteReadlist } = ctx;
   const aiList = readlists.find(r => r.ai);
   const editorial = readlists.filter(r => !r.ai);
-  const recs = books.filter(b => readIds.includes(b.id) === false).slice(0, 6);
   const readingIds = Object.keys(reading);
   const displayName = profile?.name || 'Reader';
+  const [autoGenerating, setAutoGenerating] = React.useState(false);
+  const hasTriggered = React.useRef(false);
+
   const greeting = (() => {
     const h = new Date().getHours();
     if (h < 11) return 'Good morning';
     if (h < 18) return 'Good afternoon';
     return 'Reader of the night';
   })();
+
+  const runGenerate = React.useCallback(() => {
+    if (readIds.length === 0) return;
+    setAutoGenerating(true);
+    const read = books.filter(b => readIds.includes(b.id));
+    const tagFreq = {};
+    read.forEach(b => (b.tags || []).forEach(t => { tagFreq[t] = (tagFreq[t] || 0) + 1; }));
+    const topTags = Object.entries(tagFreq).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([t]) => t);
+    const titles = read.slice(0, 5).map(b => b.title).join(', ');
+    const vibe = titles ? `Books with the same feel as: ${titles}` : 'literary fiction';
+    generateReadlist({ vibe, moods: topTags.length ? topTags : ['literary'], readIds, count: 8 })
+      .then(result => {
+        if (result?.books) {
+          result.books.forEach(b => { if (b.why) updateBook(b.id, { why: b.why }); });
+          addReadlist({
+            id: 'gen-' + Date.now(),
+            title: 'Readlist based on your past reads',
+            sub: `Generated for you · ${result.books.length} books`,
+            pitch: result.pitch,
+            accent: '#B5A7FF',
+            bookIds: result.books.map(b => b.id),
+            saves: 0,
+            curator: 'ReadMe AI',
+            ai: true,
+          });
+        }
+      })
+      .finally(() => setAutoGenerating(false));
+  }, [readIds, books, generateReadlist, addReadlist, updateBook]);
+
+  // Auto-generate once when user has reads but no AI readlist
+  React.useEffect(() => {
+    if (hasTriggered.current) return;
+    if (readIds.length === 0) return;
+    if (aiList) return;
+    hasTriggered.current = true;
+    runGenerate();
+  }, [readIds.length, aiList?.id]);
+
+  const handleRegenerate = () => {
+    if (aiList) deleteReadlist(aiList.id);
+    hasTriggered.current = false;
+    runGenerate();
+  };
 
   return (
     <div>
@@ -33,7 +79,7 @@ function HomeScreen({ ctx }) {
 
         {readIds.length === 0 && (
           <React.Fragment>
-            <p>Add books you've read and AI will build a For You readlist that updates as your shelf grows.</p>
+            <p>Add books you've read and AI will build a personalised readlist just for you.</p>
             <div className="row gap-3">
               <Button variant="ink" size="lg" iconRight="arrow-right" onClick={() => setRoute({ name: 'taste' })}>
                 Add your first read book
@@ -42,26 +88,21 @@ function HomeScreen({ ctx }) {
           </React.Fragment>
         )}
 
-        {readIds.length > 0 && !aiList && (
-          <React.Fragment>
-            <p>You have {readIds.length} {readIds.length === 1 ? 'book' : 'books'} on your shelf. Let AI turn that into a personalized readlist.</p>
-            <div className="row gap-3">
-              <Button variant="ink" size="lg" icon="sparkle" onClick={() => setRoute({ name: 'generator' })}>
-                Generate your For You readlist
-              </Button>
-            </div>
-          </React.Fragment>
+        {readIds.length > 0 && autoGenerating && (
+          <p style={{ fontFamily: 'var(--f-serif)', fontStyle: 'italic', opacity: 0.7 }}>
+            Building your readlist from {readIds.length} {readIds.length === 1 ? 'book' : 'books'}…
+          </p>
         )}
 
-        {readIds.length > 0 && aiList && (
+        {readIds.length > 0 && !autoGenerating && aiList && (
           <React.Fragment>
             <p>Based on {readIds.length} {readIds.length === 1 ? 'book' : 'books'} you've read — regenerate anytime as your shelf grows.</p>
             <div className="row gap-3">
               <Button variant="ink" size="lg" iconRight="arrow-right" onClick={() => openReadlist(aiList.id)}>
-                Open {aiList.title}
+                Open your readlist
               </Button>
-              <Button variant="outline" size="lg" icon="sparkle" onClick={() => setRoute({ name: 'generator' })}>
-                Make a new AI readlist
+              <Button variant="outline" size="lg" icon="sparkle" onClick={handleRegenerate}>
+                Regenerate
               </Button>
             </div>
           </React.Fragment>
@@ -300,7 +341,7 @@ function GeneratorScreen({ ctx }) {
 
     const newList = {
       id: 'gen-' + Date.now(),
-      title: result.title,
+      title: 'Readlist based on your past reads',
       sub: `Generated for you · ${result.books.length} books`,
       pitch: result.pitch,
       accent: '#B5A7FF',
@@ -488,12 +529,14 @@ function GeneratorAnim() {
 /* ──────────────────── TASTE PROFILE ──────────────────── */
 
 function TasteScreen({ ctx }) {
-  const { books, readIds, toggleRead, openBook, generateFromTaste, reviews, openReview, importBook } = ctx;
+  const { books, readIds, savedIds, toggleRead, openBook, reviews, openReview, importBook, generateReadlist, updateBook } = ctx;
   const [search, setSearch] = React.useState('');
   const [olResults, setOlResults] = React.useState([]);
   const [searching, setSearching] = React.useState(false);
   const [addingId, setAddingId] = React.useState(null);
-  const [showRecs, setShowRecs] = React.useState(readIds.length >= 3);
+  const [showRecs, setShowRecs] = React.useState(false);
+  const [generating, setGenerating] = React.useState(false);
+  const [aiRecs, setAiRecs] = React.useState(null);
   const API = window.README_API_BASE || '';
 
   React.useEffect(() => {
@@ -515,6 +558,25 @@ function TasteScreen({ ctx }) {
       const book = await importBook(olBook);
       if (book) { toggleRead(book.id); openBook(book.id); }
     } finally { setAddingId(null); }
+  };
+
+  const handleGenerate = async () => {
+    setShowRecs(true);
+    setGenerating(true);
+    setAiRecs(null);
+    const read = books.filter(b => readIds.includes(b.id));
+    const tagFreq = {};
+    read.forEach(b => (b.tags || []).forEach(t => { tagFreq[t] = (tagFreq[t] || 0) + 1; }));
+    const topTags = Object.entries(tagFreq).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([t]) => t);
+    const titles = read.slice(0, 5).map(b => b.title).join(', ');
+    const vibe = `Books with the same feel as: ${titles}`;
+    try {
+      const result = await generateReadlist({ vibe, moods: topTags.length ? topTags : ['literary'], readIds, count: 6 });
+      if (result?.books) {
+        result.books.forEach(b => { if (b.why) updateBook(b.id, { why: b.why }); });
+        setAiRecs(result.books);
+      }
+    } finally { setGenerating(false); }
   };
 
   const read = books.filter(b => readIds.includes(b.id));
@@ -544,9 +606,9 @@ function TasteScreen({ ctx }) {
           />
         </div>
         <Button variant="magenta" size="lg" icon="sparkle"
-          disabled={readIds.length < 3}
-          onClick={() => { setShowRecs(true); generateFromTaste(); }}>
-          {readIds.length < 3 ? `Need ${3 - readIds.length} more` : `Recommend from ${readIds.length}`}
+          disabled={readIds.length < 3 || generating}
+          onClick={handleGenerate}>
+          {generating ? 'Generating…' : readIds.length < 3 ? `Need ${3 - readIds.length} more` : `Recommend from ${readIds.length}`}
         </Button>
       </div>
 
@@ -667,23 +729,34 @@ function TasteScreen({ ctx }) {
         </div>
       </div>
 
-      {showRecs && readIds.length >= 3 && (
+      {showRecs && (
         <div data-screen-label="05 Recommendations">
-          <div className="row gap-3 mb-3">
-            <Badge color="magenta" icon="sparkle">RESULTS</Badge>
-            <span className="label" style={{ color: 'rgba(10,10,10,0.6)' }}>BASED ON {readIds.length} BOOKS · {recs.length} MATCHES</span>
-          </div>
-          <h2 className="h2 mb-5">
-            <span style={{ fontFamily: 'var(--f-serif)', fontStyle: 'italic' }}>Try these,</span>{' '}
-            <span style={{ background: 'var(--ink)', color: 'var(--yellow)', padding: '0 8px' }}>then.</span>
-          </h2>
-          <div className="mb-6">
-            {recs.map((b, i) => (
-              <BookRow key={b.id} book={b} idx={i} onClick={() => openBook(b.id)}
-                saved={savedIds.includes(b.id)}
-                onToggleSave={() => ctx.toggleSave(b.id)} />
-            ))}
-          </div>
+          {generating ? (
+            <div className="card" style={{ background: 'var(--paper-2)', padding: 40, textAlign: 'center' }}>
+              <div className="label mb-3">AI IS READING YOUR SHELF…</div>
+              <div style={{ fontFamily: 'var(--f-serif)', fontStyle: 'italic', fontSize: 17, opacity: 0.65 }}>
+                Matching your taste across the catalog
+              </div>
+            </div>
+          ) : aiRecs && aiRecs.length > 0 ? (
+            <React.Fragment>
+              <div className="row gap-3 mb-3">
+                <Badge color="magenta" icon="sparkle">AI PICKS FOR YOU</Badge>
+                <span className="label" style={{ color: 'rgba(10,10,10,0.6)' }}>BASED ON {readIds.length} BOOKS · {aiRecs.length} PICKS</span>
+              </div>
+              <h2 className="h2 mb-5">
+                <span style={{ fontFamily: 'var(--f-serif)', fontStyle: 'italic' }}>Try these,</span>{' '}
+                <span style={{ background: 'var(--ink)', color: 'var(--yellow)', padding: '0 8px' }}>then.</span>
+              </h2>
+              <div className="mb-6">
+                {aiRecs.map((b, i) => (
+                  <BookRow key={b.id} book={b} idx={i} onClick={() => openBook(b.id)}
+                    saved={savedIds.includes(b.id)}
+                    onToggleSave={() => ctx.toggleSave(b.id)} />
+                ))}
+              </div>
+            </React.Fragment>
+          ) : null}
         </div>
       )}
     </div>
